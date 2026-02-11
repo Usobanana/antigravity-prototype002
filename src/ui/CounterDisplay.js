@@ -1,7 +1,8 @@
 export class CounterDisplay {
-    constructor(state, rootElement) {
+    constructor(state, rootElement, soundManager) {
         this.state = state;
         this.root = rootElement;
+        this.soundManager = soundManager;
         this.element = document.createElement('div');
         this.init();
     }
@@ -46,6 +47,7 @@ export class CounterDisplay {
 
     handleTap() {
         this.state.increment();
+        this.soundManager.playTap();
 
         // Simple scale effect
         this.countText.style.transform = 'scale(1.2)';

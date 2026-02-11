@@ -1,0 +1,16 @@
+{
+    "name": "Antigravity Prototype",
+    "short_name": "Antigravity",
+    "description": "A simple addictive clicker game.",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#1a1a1a",
+    "theme_color": "#1a1a1a",
+    "icons": [
+        {
+            "src": "icon.svg",
+            "sizes": "512x512",
+            "type": "image/svg+xml"
+        }
+    ]
+}
