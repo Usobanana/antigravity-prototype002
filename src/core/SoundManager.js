@@ -9,71 +9,30 @@ export class SoundManager {
         this.baseInterval = 1.0; // Slow start (60 BPM)
         this.minInterval = 0.3;  // Max speed (200 BPM)
         this.currentInterval = this.baseInterval;
+
+        this.tension = 0;
+        this.noiseBuffer = this.createNoiseBuffer();
+    }
+
+    // Create noise buffer for Snare
+    createNoiseBuffer() {
+        const bufferSize = this.ctx.sampleRate * 2.0; // 2 seconds
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+        return buffer;
     }
 
     setTension(ratio) {
-        // ratio: 0.0 to 1.0
+        // ratio: 0.0 to 1.0 (0m to 10m)
         // Clamp ratio
         const r = Math.max(0, Math.min(1, ratio));
+        this.tension = r;
 
         // Linear interpolation from Base to Min
         this.currentInterval = this.baseInterval - (this.baseInterval - this.minInterval) * r;
-    }
-
-    // ... (resume, playTap unchanged) ...
-
-    playBGM() {
-        // console.log('SoundManager: playBGM called. isMuted:', this.isMuted, 'isPlayingBGM:', this.isPlayingBGM);
-
-        if (this.isMuted) return;
-
-        if (this.isPlayingBGM) {
-            this.resume();
-            return;
-        }
-
-        this.resume();
-        this.stopBGM(true);
-
-        // console.log('SoundManager: Starting BGM loop');
-        this.isPlayingBGM = true;
-
-        // Reset tempo on start?
-        // this.currentInterval = this.baseInterval; 
-        // No, let Game reset it via setTension(0)
-
-        this.scheduleNextBeat(this.ctx.currentTime);
-    }
-
-    scheduleNextBeat(time) {
-        if (!this.isPlayingBGM) return;
-
-        // Play "Kick"
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-
-        osc.frequency.setValueAtTime(100, time);
-        osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.4);
-
-        gain.gain.setValueAtTime(0.6, time);
-        gain.gain.exponentialRampToValueAtTime(0.01, time + 0.4);
-
-        osc.start(time);
-        osc.stop(time + 0.4);
-
-        // Schedule next beat based on current dynamic interval
-        const nextTime = time + this.currentInterval;
-
-        const delay = (nextTime - this.ctx.currentTime) * 1000;
-
-        if (delay > 0) {
-            this.bgmTimer = setTimeout(() => this.scheduleNextBeat(nextTime), delay);
-        } else {
-            this.scheduleNextBeat(this.ctx.currentTime + 0.1);
-        }
     }
 
     // Call this on first user interaction to unlock AudioContext on mobile
@@ -110,64 +69,116 @@ export class SoundManager {
     }
 
     playBGM() {
-        console.log('SoundManager: playBGM called. isMuted:', this.isMuted, 'isPlayingBGM:', this.isPlayingBGM);
+        // console.log('SoundManager: playBGM called. isMuted:', this.isMuted, 'isPlayingBGM:', this.isPlayingBGM);
 
         if (this.isMuted) return;
 
-        // If already playing, just ensure we are resumed
         if (this.isPlayingBGM) {
             this.resume();
             return;
         }
 
         this.resume();
-
-        // Ensure clean state before starting
         this.stopBGM(true);
 
-        console.log('SoundManager: Starting BGM loop');
+        // console.log('SoundManager: Starting BGM loop');
         this.isPlayingBGM = true;
+        this.beatCount = 0;
+
         this.scheduleNextBeat(this.ctx.currentTime);
     }
 
     scheduleNextBeat(time) {
         if (!this.isPlayingBGM) return;
 
-        // Play a "Kick" - heavy low thud
+        // 1. Kick (Every beat)
+        this.playKick(time);
+
+        // 2. Snare (Off-beat, starts appearing at tension > 0.2)
+        // beatCount % 2 !== 0 means off-beat if we consider 4/4 time
+        if (this.beatCount % 2 !== 0 && this.tension > 0.2) {
+            // Volume scales with tension: 
+            // 0.2 -> 0 volume
+            // 1.0 -> Max volume
+            const snareVol = Math.min(1, (this.tension - 0.2) * 1.5);
+            if (snareVol > 0) {
+                this.playSnare(time, snareVol);
+            }
+        }
+
+        // Schedule next beat based on current dynamic interval
+        const nextTime = time + this.currentInterval;
+        this.beatCount++;
+
+        const delay = (nextTime - this.ctx.currentTime) * 1000;
+
+        if (delay > 0) {
+            this.bgmTimer = setTimeout(() => this.scheduleNextBeat(nextTime), delay);
+        } else {
+            this.scheduleNextBeat(this.ctx.currentTime + 0.1);
+        }
+    }
+
+    playKick(time) {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
 
         osc.connect(gain);
         gain.connect(this.ctx.destination);
 
-        // Lower pitch for heavy feel
+        // Heavy Kick
         osc.frequency.setValueAtTime(100, time);
-        osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.4);
+        osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.5);
 
-        // Loud impact
-        gain.gain.setValueAtTime(0.6, time);
-        gain.gain.exponentialRampToValueAtTime(0.01, time + 0.4);
+        gain.gain.setValueAtTime(0.8, time);
+        gain.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
 
         osc.start(time);
-        osc.stop(time + 0.4);
+        osc.stop(time + 0.5);
+    }
 
-        // Schedule next beat: ~100 BPM (0.6s)
-        const nextTime = time + 0.6;
+    playSnare(time, volume) {
+        // Noise
+        const bufferSource = this.ctx.createBufferSource();
+        bufferSource.buffer = this.noiseBuffer;
 
-        const delay = (nextTime - this.ctx.currentTime) * 1000;
+        const noiseFilter = this.ctx.createBiquadFilter();
+        noiseFilter.type = "highpass";
+        noiseFilter.frequency.value = 1000;
 
-        // console.log('SoundManager: Scheduled beat. Next in', delay, 'ms');
+        const noiseGain = this.ctx.createGain();
 
-        if (delay > 0) {
-            this.bgmTimer = setTimeout(() => this.scheduleNextBeat(nextTime), delay);
-        } else {
-            // We are lagging, catch up immediately with a small offset
-            this.scheduleNextBeat(this.ctx.currentTime + 0.1);
-        }
+        bufferSource.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(this.ctx.destination);
+
+        // Envelope
+        noiseGain.gain.setValueAtTime(volume * 0.5, time); // Scale max volume
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+
+        bufferSource.start(time);
+        bufferSource.stop(time + 0.2);
+
+        // Tone (to give body)
+        const osc = this.ctx.createOscillator();
+        osc.type = 'triangle';
+        const oscGain = this.ctx.createGain();
+
+        osc.connect(oscGain);
+        oscGain.connect(this.ctx.destination);
+
+        osc.frequency.setValueAtTime(250, time);
+        oscGain.gain.setValueAtTime(volume * 0.3, time);
+        oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+
+        osc.start(time);
+        osc.stop(time + 0.1);
     }
 
     stopBGM(internal = false) {
-        if (!internal) console.log('SoundManager: stopBGM called');
+        if (!internal) {
+            // console.log('SoundManager: stopBGM called');
+        }
 
         this.isPlayingBGM = false;
         if (this.bgmTimer) {
